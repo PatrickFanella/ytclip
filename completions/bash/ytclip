@@ -1,0 +1,20 @@
+_ytclip() {
+  local current previous
+  current="${COMP_WORDS[COMP_CWORD]}"
+  previous="${COMP_WORDS[COMP_CWORD-1]}"
+
+  case "$previous" in
+    -o|--output-dir)
+      COMPREPLY=( $(compgen -d -- "$current") )
+      return
+      ;;
+  esac
+
+  if [[ "$current" == -* ]]; then
+    COMPREPLY=( $(compgen -W '--audio-only --output-dir --help --version' -- "$current") )
+  else
+    COMPREPLY=()
+  fi
+}
+
+complete -F _ytclip ytclip

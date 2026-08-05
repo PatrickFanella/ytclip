@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+readonly PROGRAM="${0##*/}"
+readonly VERSION="1.0.0"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ytclip [options] URL [START [END]]
+
+Download a YouTube video, or only the portion between two timestamps.
+
+Arguments:
+  URL                    Video URL (quote it if it contains '&' or '?')
+  START                  Clip start: seconds, MM:SS, or HH:MM:SS
+  END                    Clip end (must be later than START)
+
+Options:
+  -a, --audio-only       Save audio only as an MP3
+  -o, --output-dir DIR   Save into DIR (default: current directory)
+  -h, --help             Show this help
+  -V, --version          Show version
+
+Examples:
+  ytclip 'https://youtu.be/VIDEO_ID'
+  ytclip 'https://youtu.be/VIDEO_ID' 1:30 2:45
+  ytclip -o ~/Videos 'https://youtu.be/VIDEO_ID' 90 165
+  ytclip --audio-only 'https://youtu.be/VIDEO_ID' 00:03:10 00:04:00
+
+If END is omitted, the clip runs from START to the end of the video.
+EOF
+}
+
+die() {
+  printf '%s: error: %s\n' "$PROGRAM" "$*" >&2
+  exit 2
+}
+
+need_command() {
+  command -v "$1" >/dev/null 2>&1 || die "$2"
+}
+
+# Print a timestamp as integer milliseconds. This both validates and normalizes
+# comparisons without requiring date(1) or floating-point shell arithmetic.
+timestamp_ms() {
+  local value="$1" hours=0 minutes=0 seconds fraction=0
+  local -a fields
+
+  [[ "$value" =~ ^[0-9]+([.][0-9]{1,3})?$|^[0-9]+:[0-9]{1,2}([.][0-9]{1,3})?$|^[0-9]+:[0-9]{1,2}:[0-9]{1,2}([.][0-9]{1,3})?$ ]] || return 1
+  IFS=: read -r -a fields <<<"$value"
+
+  case "${#fields[@]}" in
+    1) seconds="${fields[0]}" ;;
+    2) minutes="${fields[0]}"; seconds="${fields[1]}" ;;
+    3) hours="${fields[0]}"; minutes="${fields[1]}"; seconds="${fields[2]}" ;;
+    *) return 1 ;;
+  esac
+
+  if [[ "$seconds" == *.* ]]; then
+    fraction="${seconds#*.}"
+    seconds="${seconds%%.*}"
+    fraction="${fraction}00"
+    fraction="${fraction:0:3}"
+  fi
+
+  if (( ${#fields[@]} >= 2 && 10#$seconds >= 60 )); then return 1; fi
+  if (( ${#fields[@]} == 3 && 10#$minutes >= 60 )); then return 1; fi
+
+  printf '%d\n' "$((10#$hours * 3600000 + 10#$minutes * 60000 + 10#$seconds * 1000 + 10#$fraction))"
+}
+
+audio_only=false
+output_dir="$PWD"
+
+while (($#)); do
+  case "$1" in
+    -a|--audio-only)
+      audio_only=true
+      shift
+      ;;
+    -o|--output-dir)
+      (($# >= 2)) || die "$1 requires a directory"
+      output_dir="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -V|--version)
+      printf '%s %s\n' "$PROGRAM" "$VERSION"
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      die "unknown option: $1 (try --help)"
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if (($# == 0)) && [[ -t 0 ]]; then
+  read -r -p 'YouTube URL: ' url
+else
+  (($# >= 1)) || die "missing URL (try --help)"
+  url="$1"
+  shift
+fi
+
+[[ -n "$url" ]] || die "URL cannot be empty"
+[[ "$url" =~ ^https?:// ]] || die "URL must start with http:// or https://"
+(($# <= 2)) || die "too many arguments (try --help)"
+
+start="${1:-}"
+end="${2:-}"
+start_ms=''
+end_ms=''
+
+if [[ -n "$start" ]]; then
+  start_ms="$(timestamp_ms "$start")" || die "invalid START timestamp: $start"
+fi
+if [[ -n "$end" ]]; then
+  [[ -n "$start" ]] || die "END requires a START timestamp"
+  end_ms="$(timestamp_ms "$end")" || die "invalid END timestamp: $end"
+  ((end_ms > start_ms)) || die "END must be later than START"
+fi
+
+need_command yt-dlp "yt-dlp is not installed; on Arch Linux run: sudo pacman -S yt-dlp"
+need_command ffmpeg "ffmpeg is not installed; on Arch Linux run: sudo pacman -S ffmpeg"
+
+mkdir -p -- "$output_dir"
+[[ -d "$output_dir" && -w "$output_dir" ]] || die "output directory is not writable: $output_dir"
+
+declare -a command=(
+  yt-dlp
+  --no-playlist
+  --newline
+  --embed-metadata
+  --embed-thumbnail
+)
+
+if $audio_only; then
+  command+=(--extract-audio --audio-format mp3 --audio-quality 0)
+else
+  command+=(--format 'bv*+ba/b' --merge-output-format mp4)
+fi
+
+if [[ -n "$start" ]]; then
+  section="*${start}-${end:-inf}"
+  safe_start="${start//:/-}"
+  safe_end="${end//:/-}"
+  safe_end="${safe_end:-end}"
+  command+=(
+    --download-sections "$section"
+    --force-keyframes-at-cuts
+    --output "$output_dir/%(title)s [%(id)s] [${safe_start}-${safe_end}].%(ext)s"
+  )
+else
+  command+=(--output "$output_dir/%(title)s [%(id)s].%(ext)s")
+fi
+
+printf 'Saving to: %s\n' "$output_dir" >&2
+exec "${command[@]}" "$url"

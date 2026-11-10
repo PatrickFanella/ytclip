@@ -2,7 +2,8 @@
 
 `ytclip` is a small Bash command for downloading a complete YouTube video or
 only a timestamped excerpt. It wraps `yt-dlp` and `ffmpeg` with a deliberately
-small interface and validates timestamps before starting a download.
+small interface and validates timestamps before starting a download. It also
+installs Bash completion. The current version is 1.0.0.
 
 > Download only media you are permitted to save. You are responsible for
 > complying with copyright law and the source site's terms.
@@ -21,9 +22,11 @@ sudo pacman -S --needed yt-dlp ffmpeg
 
 ## Install
 
-For a normal per-user installation:
+Clone the repository and run the installer:
 
 ```bash
+git clone https://github.com/subculture-collective/ytclip.git
+cd ytclip
 ./install.sh
 ```
 
@@ -34,8 +37,10 @@ effect immediately:
 ./install.sh --link
 ```
 
-The default destination is `~/.local/bin/ytclip`. Ensure `~/.local/bin` is on
-your `PATH`. Run `./install.sh --help` to select another prefix.
+The default destination is `~/.local/bin/ytclip`, with completion in
+`~/.local/share/bash-completion/completions/ytclip`. Ensure `~/.local/bin` is
+on your `PATH`. Use `./install.sh --prefix DIR` for another prefix. An existing
+file that differs is moved aside with a `.backup.<timestamp>` suffix.
 
 ## Quick start
 
@@ -89,6 +94,13 @@ docs/                      User documentation
 install.sh                 Copy or link a per-user installation
 tests/test.sh              Offline CLI smoke tests
 ```
+
+## Contributing
+
+Report bugs and request features in
+[GitHub issues](https://github.com/subculture-collective/ytclip/issues). Send
+code as a pull request on GitHub against `main`; CI runs `tests/test.sh` on
+every pull request.
 
 ## License
 
